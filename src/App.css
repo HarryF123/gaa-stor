@@ -1,0 +1,175 @@
+.page-header {
+  color: #00ff00;
+  text-align: center;
+  margin-bottom: 20px;
+}
+
+/* Mobile-first: Elements stack cleanly vertically */
+.layout {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  gap: 20px;
+}
+
+.map-col {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  height: 600px; /* Lock this to your preferred pixel layout size */
+  max-height: 100%; /* Prevents the box from blowing past parent element limits */
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden; /* Safely cuts off rogue absolute marker layers */
+}
+
+.map-frame {
+  position: relative;
+  height: 100%;   /* now resolves against .map-col's concrete 600px */
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.map-frame svg {
+  width: auto !important;   /* Let width scale down organically */
+  height: 100% !important;  /* 🌟 CRITICAL: Forces height to stretch/shrink to parent bounds */
+  max-height: 100%;
+  display: block;
+}
+
+
+.side-col {
+  width: 100%;
+  height: 600px;
+  display: flex;
+  max-height: 100%; /* Prevents the box from blowing past parent element limits */
+  flex-direction: column;
+  gap: 15px; /* Spaces out your 3 sub-sections vertically */
+}
+
+.sub-box {
+  background: #435970;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  padding: 16px;
+}
+
+.side-col > div {
+  /* Critical: Forces all three children to grow equally 
+     and share 1/3 of the available height */
+  flex: 1; 
+  
+  /* Optional: Ensures content doesn't break the layout if it overflows */
+  min-height: 0; 
+}
+
+/* Desktop Split: Shifting side-by-side at 768px wide */
+@media (min-width: 768px) {
+  .layout {
+    flex-direction: row;
+    align-items: flex-start; /* Aligns columns at the top */
+    gap: 40px; /* Creates clean channel space between map and dashboard */
+  }
+
+  .map-col {
+    width: 55%; /* Map takes up slightly more than half the view */
+    flex-shrink: 0;
+  }
+
+  .side-col {
+    width: 45%; /* Sub-sections take up the remainder */
+  }
+}
+
+/* Base style for unhovered counties */
+.county-path {
+  fill: #111827; /* Solid sharp dark-mode black */
+  stroke: #374151; /* Thin county separator boundary line */
+  stroke-width: 0.75px;
+  vector-effect: non-scaling-stroke;
+  outline: none;
+  transition: fill 0.1s ease, stroke 0.1s ease, stroke-width 0.1s ease;
+}
+
+/* 💡 Sharp Hover Action: No filters or opacity washouts */
+.county-path:hover {
+  fill: var(--county-colour) !important; /* Instantly draws the crisp repeating stripes */
+  stroke: #ffffff !important; /* Clean standout border highlight */
+  opacity: .5 !important; /* Removes any blur effect */
+  stroke-width: 2px !important;
+  cursor: pointer;
+}
+
+.pitch-marker-label {
+  opacity: 0;
+  pointer-events: none; /* label itself shouldn't block hover/click on the circle */
+  fill: #ffffff;
+  font-size: 6px;
+  transition: opacity 0.1s ease;
+}
+
+.pitch-marker-pin {
+  fill: #fefefe; /* pick whatever color reads well against your county fill */
+  stroke: #111827;
+  stroke-width: 0.5px;
+  cursor: pointer;
+  transition: r 0.1s ease;
+}
+
+.pitch-marker:hover .pitch-marker-label {
+  opacity: 1;
+}
+
+.pitch-marker:hover .pitch-marker-pin {
+  r: 4; /* optional: grow the dot slightly on hover too */
+}
+
+.map-frame {
+  position: relative; /* anchors the return button inside the map, not the whole page */
+}
+
+.cluster-marker {
+  fill: #f97316;
+  stroke: #ffffff;
+  stroke-width: 1px;
+  cursor: pointer;
+}
+
+.cluster-marker-label {
+  fill: #111827;
+  font-size: 6px;
+  font-weight: 700;
+  pointer-events: none;
+}
+
+.cluster-return-marker {
+  fill: #1f2937;
+  stroke: #f97316;
+  stroke-width: 1px;
+  cursor: pointer;
+}
+
+.spider-leader-line {
+  pointer-events: none; /* don't let the faint line steal hover/click from markers */
+}
+
+.cluster-return-button {
+  position: absolute;
+  top: 12px;
+  left: 12px;
+  z-index: 10;
+  background: #1f2937;
+  color: #ffffff;
+  border: 1px solid #4b5563;
+  border-radius: 6px;
+  padding: 6px 12px;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.cluster-return-button:hover {
+  background: #374151;
+}  

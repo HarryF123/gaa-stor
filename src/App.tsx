@@ -1,9 +1,11 @@
-import React, {
+import {
   useState,
   useRef,
   useEffect,
   useMemo,
   useCallback,
+  Fragment,
+  type RefObject,
 } from "react";
 import {
   ComposableMap,
@@ -15,22 +17,23 @@ import {
 } from "react-simple-maps";
 import { gaaCounties } from "./assets/county_assets";
 import { countyPitchAssets } from "./assets/county_pitch_assets";
+import type { PitchWithCoords } from "./assets/county_pitch_assets";
 import { CountyColourPattern } from "./assets/CountyColourPattern";
 import { clusterPitches } from "./assets/pitch_clustering";
+import type { PitchCluster } from "./assets/pitch_clustering";
 import "./App.css";
 
 const geoUrl = "/ireland-counties.json";
-const defaultMapState = { center: [-8, 53.5], zoom: 1.3 };
 
-// Stable, module-level constants — never recreated on render, so they
-// never trigger ZoomableGroup's internal effects to re-fire.
+interface MapViewState {
+  center: [number, number];
+  zoom: number;
+}
+
+const defaultMapState: MapViewState = { center: [-8, 53.5], zoom: 1.3 };
+
 const BLOCKED_ZOOM_GESTURES = ["wheel", "mousedown", "touchstart", "dblclick"];
 
-// translateExtent isn't used any more (unsupported in this version /
-// unnecessary now that all pan/zoom is fully programmatic). This is a
-// manual replacement so `center` can never drift outside Ireland's
-// rough bounding box, regardless of what a future gaaCounties entry
-// might contain.
 const MAP_BOUNDS = {
   lngMin: -11,
   lngMax: -5,
@@ -38,33 +41,84 @@ const MAP_BOUNDS = {
   latMax: 55.5,
 };
 
-function clampCenter([lng, lat]) {
+function clampCenter([lng, lat]: [number, number]): [number, number] {
   return [
     Math.min(Math.max(lng, MAP_BOUNDS.lngMin), MAP_BOUNDS.lngMax),
     Math.min(Math.max(lat, MAP_BOUNDS.latMin), MAP_BOUNDS.latMax),
   ];
 }
 
+// Minimal shape of what we read off geography.properties — adjust the
+// key names to match whatever ireland-counties.json actually uses.
+interface CountyGeoProperties {
+  NAME_1?: string;
+  name?: string;
+  COUNTY?: string;
+}
+
+// --- Fix #1: tooltip position tracking lives entirely inside this leaf
+// component now. It attaches its own mousemove listener to the map frame
+// and owns its own `pos` state, so mouse movement no longer re-renders
+// <App> (and therefore never re-renders the county paths / markers).
+function HoverTooltip({
+  frameRef,
+  label,
+}: {
+  frameRef: RefObject<HTMLDivElement | null>;
+  label: string | null;
+}) {
+  const [pos, setPos] = useState({ x: 0, y: 0 });
+
+  useEffect(() => {
+    const node = frameRef.current;
+    if (!node) return;
+    const handleMove = (e: MouseEvent) => {
+      setPos({ x: e.clientX, y: e.clientY });
+    };
+    node.addEventListener("mousemove", handleMove);
+    return () => node.removeEventListener("mousemove", handleMove);
+  }, [frameRef]);
+
+  if (!label) return null;
+
+  return (
+    <div
+      className="county-hover-popup"
+      style={{
+        position: "fixed",
+        left: `${pos.x + 20}px`,
+        top: `${pos.y - 45}px`,
+        backgroundColor: "#1f2937",
+        color: "#ffffff",
+        padding: "6px 12px",
+        borderRadius: "4px",
+        fontSize: "12px",
+        fontFamily: "sans-serif",
+        border: "1px solid #4b5563",
+        pointerEvents: "none",
+        boxShadow: "0 4px 6px rgba(0,0,0,0.3)",
+      }}
+    >
+      <p>{label}</p>
+    </div>
+  );
+}
+
 export default function App() {
-  const mapFrameRef = useRef(null);
+  const mapFrameRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     const node = mapFrameRef.current;
     if (!node) return;
-    const preventPinchZoom = (event) => {
-      if (event.ctrlKey) {
-        event.preventDefault();
-      }
+    const preventPinchZoom = (event: WheelEvent) => {
+      if (event.ctrlKey) event.preventDefault();
     };
     node.addEventListener("wheel", preventPinchZoom, { passive: false });
-    return () => {
-      node.removeEventListener("wheel", preventPinchZoom);
-    };
+    return () => node.removeEventListener("wheel", preventPinchZoom);
   }, []);
 
-  const [clickedCounty, setClickedCounty] = useState(null);
-  const [hoveredCounty, setHoveredCounty] = useState(null);
-  const [pos, setPos] = useState({ x: 0, y: 0 });
+  const [clickedCounty, setClickedCounty] = useState<string | null>(null);
+  const [hoveredCounty, setHoveredCounty] = useState<string | null>(null);
 
   const activeCountyName = clickedCounty || hoveredCounty;
   const activeConfig = activeCountyName ? gaaCounties[activeCountyName] : null;
@@ -73,81 +127,71 @@ export default function App() {
         activeConfig.primaryColor,
         activeConfig.secondaryColor,
         activeConfig.tertiaryColor,
-      ].filter(Boolean)
+      ].filter((c): c is string => Boolean(c))
     : [];
 
-  const [filteredPitches, setFilteredPitches] = useState([]);
-  const [mapViewport, setMapViewState] = useState(defaultMapState);
-  const [hoveredClub, setHoveredClub] = useState(null);
-  const [expandedCluster, setCluster] = useState(null);
+  const [filteredPitches, setFilteredPitches] = useState<PitchWithCoords[]>([]);
+  const [mapViewport, setMapViewState] = useState<MapViewState>(defaultMapState);
+  const [hoveredClub, setHoveredClub] = useState<string | null>(null);
+  const [expandedCluster, setCluster] = useState<string | null>(null);
 
-  const clusters = useMemo(
+  const clusters: PitchCluster[] = useMemo(
     () => clusterPitches(filteredPitches, 5),
     [filteredPitches],
   );
 
-  // Stable reference — no external deps, so this is created once and
-  // never causes ZoomableGroup's sync effect to re-fire on re-render.
   const filterZoomEvent = useCallback(
-    (event) => !BLOCKED_ZOOM_GESTURES.includes(event.type),
+    (event: { type: string }) => !BLOCKED_ZOOM_GESTURES.includes(event.type),
     [],
   );
 
-  // Single, shared mouse-position tracker for both hover tooltips.
-  // Replaces the old per-element onMouseMove handlers that were
-  // duplicated across every county path and every pitch marker,
-  // which forced a full re-render on every pixel of cursor movement.
-  const handleMapMouseMove = useCallback((e) => {
-    setPos({ x: e.clientX, y: e.clientY });
-  }, []);
+  const handleCountyClick = useCallback(
+    (geo: { properties?: CountyGeoProperties | null }) => {
+      if (!geo || !geo.properties) return;
+      const countyName =
+        geo.properties.NAME_1 || geo.properties.name || geo.properties.COUNTY;
+      if (!countyName) return;
 
-  const handleCountyClick = (geo) => {
-    // 💡 Guard fallback: Ensure geo object properties exist safely
-    if (!geo || !geo.properties) return;
-    const countyName =
-      geo.properties.NAME_1 || geo.properties.name || geo.properties.COUNTY;
-    if (!countyName) return;
-
-    if (clickedCounty === countyName) {
-      setClickedCounty(null);
-      setFilteredPitches([]);
-      setCluster(null);
-      setMapViewState(defaultMapState);
-    } else {
-      setClickedCounty(countyName);
-      setCluster(null); // Reset cluster expansion when a new county is clicked
-
-      const countyConfig = gaaCounties[countyName];
-
-      if (countyConfig && countyConfig.center) {
-        setMapViewState({
-          center: clampCenter(countyConfig.center),
-          zoom: countyConfig.zoom,
-        });
-      } else {
+      if (clickedCounty === countyName) {
+        setClickedCounty(null);
+        setFilteredPitches([]);
+        setCluster(null);
         setMapViewState(defaultMapState);
-      }
+      } else {
+        setClickedCounty(countyName);
+        setCluster(null);
 
-      const pitches = countyPitchAssets
-        .filter(
-          (p) =>
-            p.County?.trim().toLowerCase() === countyName.trim().toLowerCase(),
-        )
-        .map((p) => ({
-          ...p,
-          lat: parseFloat(p.Latitude),
-          lng: parseFloat(p.Longitude),
-        }))
-        .filter((p) => !Number.isNaN(p.lat) && !Number.isNaN(p.lng));
-      setFilteredPitches(pitches);
-    }
-  };
+        const countyConfig = gaaCounties[countyName];
+        if (countyConfig && countyConfig.center) {
+          setMapViewState({
+            center: clampCenter(countyConfig.center),
+            zoom: countyConfig.zoom,
+          });
+        } else {
+          setMapViewState(defaultMapState);
+        }
+
+        const pitches: PitchWithCoords[] = countyPitchAssets
+          .filter(
+            (p) =>
+              p.County?.trim().toLowerCase() === countyName.trim().toLowerCase(),
+          )
+          .map((p) => ({
+            ...p,
+            lat: parseFloat(p.Latitude),
+            lng: parseFloat(p.Longitude),
+          }))
+          .filter((p) => !Number.isNaN(p.lat) && !Number.isNaN(p.lng));
+        setFilteredPitches(pitches);
+      }
+    },
+    [clickedCounty],
+  );
 
   useEffect(() => {
-    const handleEsc = (e) => {
+    const handleEsc = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
         setCluster(null);
-        // 💡 Smoothly restore camera zoom back to the main county view boundaries
         if (clickedCounty && gaaCounties[clickedCounty]) {
           setMapViewState({
             center: clampCenter(gaaCounties[clickedCounty].center),
@@ -158,7 +202,7 @@ export default function App() {
     };
     window.addEventListener("keydown", handleEsc);
     return () => window.removeEventListener("keydown", handleEsc);
-  }, [clickedCounty]); // 💡 Added clickedCounty dependency here
+  }, [clickedCounty]);
 
   return (
     <div className="page">
@@ -167,18 +211,13 @@ export default function App() {
       </header>
 
       <div className="layout">
-        {/* Left Column: Interactive Map Canvas */}
         <section className="map-col">
-          <div
-            className="map-frame"
-            ref={mapFrameRef}
-            onMouseMove={handleMapMouseMove}
-          >
+          {/* Fix #1: no onMouseMove here anymore — HoverTooltip components
+              below attach their own listeners to this ref independently. */}
+          <div className="map-frame" ref={mapFrameRef}>
             <ComposableMap
               projection="geoMercator"
-              projectionConfig={{
-                scale: 4500,
-              }}
+              projectionConfig={{ scale: 4500 }}
               width={600}
               height={700}
               preserveAspectRatio="xMidYMid meet"
@@ -190,10 +229,7 @@ export default function App() {
               }}
             >
               <defs>
-                <CountyColourPattern
-                  id="county-colours"
-                  colours={activeColours}
-                />
+                <CountyColourPattern id="county-colours" colours={activeColours} />
               </defs>
 
               <ZoomableGroup
@@ -205,10 +241,10 @@ export default function App() {
               >
                 <Geographies geography={geoUrl}>
                   {({ geographies }) =>
-                    // 💡 CRITICAL FIX: Add a fallback check to make sure vector arrays are loaded before mapping
                     geographies && geographies.length > 0 ? (
                       geographies.map((geo) => {
-                        const properties = geo.properties || {};
+                        const properties = (geo.properties ||
+                          {}) as CountyGeoProperties;
                         const name =
                           properties.NAME_1 || properties.name || "Unknown";
                         const isTarget =
@@ -219,22 +255,21 @@ export default function App() {
 
                         return (
                           <Geography
-                            key={`${geo.rsmKey}-${clickedCounty}`}
+                            // Fix #2: key no longer includes clickedCounty —
+                            // paths update via isTarget/style, they don't remount.
+                            key={geo.rsmKey}
                             geography={geo}
                             onClick={() => handleCountyClick(geo)}
                             onMouseEnter={() =>
                               !clickedCounty && setHoveredCounty(name)
                             }
                             onMouseLeave={() => setHoveredCounty(null)}
-                            style={{
-                              "--county-colour": gaaFillValue,
-                            }}
+                            style={{ "--county-colour": gaaFillValue } as any}
                             className={`county-path ${isTarget ? "is-active" : ""}`}
                           />
                         );
                       })
                     ) : (
-                      // Fallback text elements while JSON vectors resolve asynchronously
                       <text
                         x="300"
                         y="350"
@@ -258,7 +293,6 @@ export default function App() {
                       .map((cluster) => {
                         const isExpanded = expandedCluster === cluster.id;
 
-                        // ungrouped single pitch — render normally
                         if (cluster.pitches.length === 1) {
                           const pitch = cluster.pitches[0];
                           return (
@@ -274,9 +308,7 @@ export default function App() {
                                 <circle
                                   r={2.5}
                                   className="pitch-marker-pin"
-                                  onMouseEnter={() =>
-                                    setHoveredClub(pitch.Club)
-                                  }
+                                  onMouseEnter={() => setHoveredClub(pitch.Club)}
                                   onMouseLeave={() => setHoveredClub(null)}
                                 />
                               </g>
@@ -284,28 +316,28 @@ export default function App() {
                           );
                         }
 
-                        // this cluster is exploded open
                         if (isExpanded) {
                           const spiderRadiusDeg =
-                            0.1 + cluster.pitches.length * 0.01; // wider "blow out" — bump up/down to taste
+                            0.1 + cluster.pitches.length * 0.01;
 
                           return (
                             <g key={cluster.id}>
                               {cluster.pitches.map((pitch, idx) => {
                                 const angle =
                                   (2 * Math.PI * idx) / cluster.pitches.length;
-                                const spiderCoords = [
+                                const spiderCoords: [number, number] = [
                                   cluster.centroid.lng +
                                     spiderRadiusDeg * Math.cos(angle),
                                   cluster.centroid.lat +
                                     spiderRadiusDeg * Math.sin(angle),
                                 ];
-                                const realCoords = [pitch.lng, pitch.lat];
+                                const realCoords: [number, number] = [
+                                  pitch.lng,
+                                  pitch.lat,
+                                ];
 
                                 return (
-                                  <React.Fragment
-                                    key={`${pitch.Club}-${pitch.Pitch}-${idx}`}
-                                  >
+                                  <Fragment key={`${pitch.Club}-${pitch.Pitch}-${idx}`}>
                                     <Line
                                       from={realCoords}
                                       to={spiderCoords}
@@ -314,15 +346,11 @@ export default function App() {
                                       strokeDasharray="2,2"
                                       className="spider-leader-line"
                                     />
-
                                     <Marker
                                       coordinates={spiderCoords}
                                       onClick={(e) => {
                                         e.stopPropagation();
-                                        console.log(
-                                          "Clicked pitch:",
-                                          pitch.Club,
-                                        );
+                                        console.log("Clicked pitch:", pitch.Club);
                                       }}
                                     >
                                       <g className="pitch-marker">
@@ -332,29 +360,20 @@ export default function App() {
                                           onMouseEnter={() =>
                                             setHoveredClub(pitch.Club)
                                           }
-                                          onMouseLeave={() =>
-                                            setHoveredClub(null)
-                                          }
+                                          onMouseLeave={() => setHoveredClub(null)}
                                         />
                                       </g>
                                     </Marker>
-                                  </React.Fragment>
+                                  </Fragment>
                                 );
                               })}
 
-                              {/* centre return node — click it to collapse back */}
                               <Marker
-                                coordinates={[
-                                  cluster.centroid.lng,
-                                  cluster.centroid.lat,
-                                ]}
+                                coordinates={[cluster.centroid.lng, cluster.centroid.lat]}
                                 onClick={(e) => {
                                   e.stopPropagation();
                                   setCluster(null);
-                                  if (
-                                    clickedCounty &&
-                                    gaaCounties[clickedCounty]
-                                  ) {
+                                  if (clickedCounty && gaaCounties[clickedCounty]) {
                                     setMapViewState({
                                       center: clampCenter(
                                         gaaCounties[clickedCounty].center,
@@ -374,25 +393,19 @@ export default function App() {
                           );
                         }
 
-                        // collapsed cluster badge
                         return (
                           <Marker
                             key={cluster.id}
-                            coordinates={[
-                              cluster.centroid.lng,
-                              cluster.centroid.lat,
-                            ]}
+                            coordinates={[cluster.centroid.lng, cluster.centroid.lat]}
                             onClick={(e) => {
                               e.stopPropagation();
                               setCluster(cluster.id);
-
-                              // 💡 PUSH CAMERA ZOOM DEEPER UPON CLICK
                               setMapViewState({
                                 center: clampCenter([
                                   cluster.centroid.lng,
                                   cluster.centroid.lat,
                                 ]),
-                                zoom: 5.5, // ⬅️ Increases focus mapping detail level to separate spider lines nicely
+                                zoom: 5.5,
                               });
                             }}
                           >
@@ -412,83 +425,37 @@ export default function App() {
             </ComposableMap>
 
             {expandedCluster && (
-              <button
-                className="collapse-cluster-button"
-                onClick={() => setCluster(null)}
-              >
+              <button className="collapse-cluster-button" onClick={() => setCluster(null)}>
                 Back to County View
               </button>
             )}
 
-            {/* Popup for hovered county */}
-            {hoveredCounty && !clickedCounty && (
-              <div
-                className="county-hover-popup"
-                style={{
-                  position: "fixed",
-                  bottom: "auto",
-                  right: "auto",
-                  left: `${pos.x + 20}px`,
-                  top: `${pos.y - 45}px`,
-                  backgroundColor: "#1f2937",
-                  color: "#ffffff",
-                  padding: "6px 12px",
-                  borderRadius: "4px",
-                  fontSize: "12px",
-                  fontFamily: "sans-serif",
-                  border: "1px solid #4b5563",
-                  pointerEvents: "none", // 🌟 CRITICAL: Prevents the popup from blocking mouse events on the map below
-                  boxShadow: "0 4px 6px rgba(0,0,0,0.3)",
-                }}
-              >
-                <p>{hoveredCounty}</p>
-              </div>
-            )}
-            {hoveredClub && clickedCounty && (
-              <div
-                className="club-hover-popup"
-                style={{
-                  position: "fixed",
-                  bottom: "auto",
-                  right: "auto",
-                  left: `${pos.x + 20}px`,
-                  top: `${pos.y - 45}px`,
-                  backgroundColor: "#1f2937",
-                  color: "#ffffff",
-                  padding: "6px 12px",
-                  borderRadius: "4px",
-                  fontSize: "12px",
-                  fontFamily: "sans-serif",
-                  border: "1px solid #4b5563",
-                  pointerEvents: "none", // 🌟 CRITICAL: Prevents the popup from blocking mouse events on the map below
-                  boxShadow: "0 4px 6px rgba(0,0,0,0.3)",
-                }}
-              >
-                <p>{hoveredClub}</p>
-              </div>
-            )}
+            <HoverTooltip
+              frameRef={mapFrameRef}
+              label={!clickedCounty ? hoveredCounty : null}
+            />
+            <HoverTooltip
+              frameRef={mapFrameRef}
+              label={clickedCounty ? hoveredClub : null}
+            />
           </div>
 
           <div className="status-panel">
             {clickedCounty ? (
               <p>
-                Viewing <span className="text-highlight">{clickedCounty}</span>{" "}
-                — {filteredPitches.length} Pitches Loaded. Click again to zoom
-                out.
+                Viewing <span className="text-highlight">{clickedCounty}</span> —{" "}
+                {filteredPitches.length} Pitches Loaded. Click again to zoom out.
               </p>
             ) : (
               <p>
                 Inspecting:{" "}
-                <span className="text-highlight">
-                  {hoveredCounty || "None"}
-                </span>{" "}
-                | Click a county to enlarge matches
+                <span className="text-highlight">{hoveredCounty || "None"}</span> |
+                Click a county to enlarge matches
               </p>
             )}
           </div>
         </section>
 
-        {/* Right Column: Dynamic Side Information Dashboard */}
         <aside className="side-col">
           <div
             className="sub-box county-banner"
@@ -511,16 +478,12 @@ export default function App() {
                   ></span>
                   <span
                     className="swatch"
-                    style={{
-                      backgroundColor: activeConfig.secondaryColor,
-                    }}
+                    style={{ backgroundColor: activeConfig.secondaryColor }}
                   ></span>
                   {activeConfig.tertiaryColor && (
                     <span
                       className="swatch"
-                      style={{
-                        backgroundColor: activeConfig.tertiaryColor,
-                      }}
+                      style={{ backgroundColor: activeConfig.tertiaryColor }}
                     ></span>
                   )}
                 </div>
@@ -532,7 +495,6 @@ export default function App() {
               </p>
             )}
           </div>
-
         </aside>
       </div>
     </div>

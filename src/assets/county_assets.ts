@@ -1,4 +1,13 @@
-export const gaaCounties = {
+export interface CountyConfig {
+  primaryColor: string;
+  secondaryColor: string;
+  tertiaryColor?: string;
+  stadium: string;
+  center: [number, number];
+  zoom: number;
+}
+
+export const gaaCounties: Record<string, CountyConfig> = {
   "Antrim": {
     primaryColor: "#ffb703",
     secondaryColor: "#ffffff",

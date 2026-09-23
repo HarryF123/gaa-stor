@@ -1,4 +1,27 @@
-export const countyPitchAssets = [
+export interface PitchAsset {
+  File: string;
+  Club: string;
+  Colours: { primary: string; secondary: string };
+  Crest: string;
+  Pitch: string;
+  Code: string;
+  Latitude: string;
+  Longitude: string;
+  Province: string;
+  Country: string;
+  Division: string;
+  County: string;
+  Twitter: string;
+  Wikipedia: string;
+}
+
+// Derived shape used once App.tsx parses Latitude/Longitude into numbers
+export interface PitchWithCoords extends PitchAsset {
+  lat: number;
+  lng: number;
+}
+
+export const countyPitchAssets: PitchAsset[] = [
   {
     "File": "Ireland",
     "Club": "Allen Gaels GAA, Drumshanbo",

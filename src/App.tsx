@@ -37,11 +37,9 @@ import {
   MantineProvider,
   createTheme,
   ActionIcon,
-  useMantineColorScheme,
-  useComputedColorScheme,
+  Autocomplete,
 } from "@mantine/core";
-import { SunIcon, MoonIcon } from "@phosphor-icons/react";
-import cx from "clsx";
+import { Sun, Moon } from "@phosphor-icons/react";
 
 const geoUrl = "/ireland-counties.json";
 const pmtilesprotocol = new pmtiles.Protocol();
@@ -57,7 +55,7 @@ const defaultMapState: MapViewState = { center: [-7.1, 53.4], zoom: 6.0 };
 const MIN_ZOOM = 5.5;
 const MAX_ZOOM = 18;
 
-const CLUSTER_MAX_VISIBLE_ZOOM = 15;
+const CLUSTER_MAX_VISIBLE_ZOOM = 14;
 const CLUSTER_RADIUS_PX = 40;
 
 const MAP_BOUNDS: [number, number, number, number] = [-11.5, 51.0, -5.0, 55.6];
@@ -144,6 +142,20 @@ export default function App() {
   const [clickedCounty, setClickedCounty] = useState<string | null>(null);
   const [hoveredCounty, setHoveredCounty] = useState<string | null>(null);
   const [filteredPitches, setFilteredPitches] = useState<PitchWithCoords[]>([]);
+
+  const getPitchesForCounty = useCallback((countyName: string) => {
+    return countyPitchAssets
+      .filter(
+        (p) =>
+          p.County?.trim().toLowerCase() === countyName.trim().toLowerCase(),
+      )
+      .map((p) => ({
+        ...p,
+        lat: parseFloat(p.Latitude),
+        lng: parseFloat(p.Longitude),
+      }))
+      .filter((p) => !Number.isNaN(p.lat) && !Number.isNaN(p.lng));
+  }, []);
   const [mapViewport, setMapViewState] =
     useState<MapViewState>(defaultMapState);
   const [hoveredClub, setHoveredClub] = useState<string | null>(null);
@@ -174,13 +186,12 @@ export default function App() {
       const id = f.properties?.id as number;
       if (seen.has(id)) continue;
       const p = pitchById.get(id);
-      // guard against a stale source right after switching counties
       if (!p || p.Club !== f.properties?.club) continue;
       seen.add(id);
       next.push({ id, club: p.Club, lng: p.lng, lat: p.lat });
     }
     setUnclusteredPitches(next);
-  }, [clickedCounty, filteredPitches]);
+  }, [clickedCounty, pitchById]);
 
   const onPitchSourceData = useCallback(
     (event: MapSourceDataEvent) => {
@@ -199,7 +210,7 @@ export default function App() {
     Object.entries(gaaCounties).forEach(([name, cfg]) => {
       expr.push(name, cfg.primaryColor);
     });
-    expr.push("#cbd5e1"); // fallback for any county with no config
+    expr.push("#cbd5e1");
     return expr as unknown as maplibregl.ExpressionSpecification;
   }, []);
 
@@ -224,8 +235,8 @@ export default function App() {
     () => ({
       bounds: MAP_BOUNDS,
       fitBoundsOptions: {
-        padding: 40, // Keeps a 20px gap from the edge of the map container
-        maxZoom: 7, // Caps how close it zooms in on large 4K screens at launch
+        padding: 40,
+        maxZoom: 7,
       },
     }),
     [],
@@ -316,9 +327,6 @@ export default function App() {
       const map = mapRef.current?.getMap();
       if (!map) return;
 
-      // 1. Cluster bubble — ask Supercluster (via the GL source) what zoom
-      // level would split it apart, then fly there. This is the native
-      // equivalent of the old CLUSTER_CLICK_ZOOM_FACTOR re-clustering.
       const clusterFeature = event.features?.find(
         (f) => f.layer?.id === "clustered-circles",
       );
@@ -342,7 +350,6 @@ export default function App() {
         return;
       }
 
-      // 2. County polygon.
       const countyFeature = event.features?.find(
         (f) => f.layer?.id === "county-fill",
       );
@@ -378,18 +385,7 @@ export default function App() {
       clickedFeatureIdRef.current = countyFeature.id ?? null;
       setClickedCounty(countyName);
 
-      const pitches: PitchWithCoords[] = countyPitchAssets
-        .filter(
-          (p) =>
-            p.County?.trim().toLowerCase() === countyName.trim().toLowerCase(),
-        )
-        .map((p) => ({
-          ...p,
-          lat: parseFloat(p.Latitude),
-          lng: parseFloat(p.Longitude),
-        }))
-        .filter((p) => !Number.isNaN(p.lat) && !Number.isNaN(p.lng));
-      setFilteredPitches(pitches);
+      setFilteredPitches(getPitchesForCounty(countyName));
 
       const countyConfig = gaaCounties[countyName];
       if (countyConfig?.center) {
@@ -401,7 +397,7 @@ export default function App() {
         });
       }
     },
-    [clickedCounty],
+    [clickedCounty, getPitchesForCounty],
   );
 
   const countyBaseZoom = clickedCounty
@@ -410,13 +406,48 @@ export default function App() {
   const showResetButton =
     !!clickedCounty && mapViewport.zoom > countyBaseZoom + 0.5;
 
-  const theme = createTheme({});
+  const [query, setQuery] = useState("");
+  const clubOptions = useMemo(
+    () =>
+      countyPitchAssets.map((p) => ({
+        value: String(p.id),
+        label: `${p.Club} (${p.County})`,
+      })),
+    [],
+  );
 
   return (
-    <MantineProvider theme={theme}>
+    <MantineProvider>
       <div className="page">
         <header className="page-header">
           <h1>GAA Stór</h1>
+          <Autocomplete
+            label="Search clubs"
+            placeholder="Type a club name…"
+            data={clubOptions}
+            value={query}
+            onChange={setQuery}
+            onOptionSubmit={(id) => {
+              const pitch = countyPitchAssets.find((p) => String(p.id) === id);
+              if (!pitch) return;
+
+              setQuery(pitch.Club);
+              setClickedCounty(pitch.County);
+              setFilteredPitches(getPitchesForCounty(pitch.County));
+
+              const map = mapRef.current?.getMap();
+              map?.flyTo({
+                center: [
+                  parseFloat(pitch.Longitude),
+                  parseFloat(pitch.Latitude),
+                ],
+                zoom: CLUSTER_MAX_VISIBLE_ZOOM + 1,
+                duration: 1200,
+              });
+            }}
+            limit={8}
+            comboboxProps={{ shadow: "md" }}
+          />
           <ActionIcon
             onClick={() => {
               const current = document.documentElement.getAttribute(
@@ -433,9 +464,8 @@ export default function App() {
             aria-label="Toggle color scheme"
             className="theme-toggle-btn"
           >
-            {/* ✅ FIXED: Removed cx() and classes. references entirely */}
-            <SunIcon size={22} className="icon-sun" />
-            <MoonIcon size={22} className="icon-moon" />
+            <Sun size={22} className="icon-sun" />
+            <Moon size={22} className="icon-moon" />
           </ActionIcon>
         </header>
 
@@ -610,8 +640,7 @@ export default function App() {
                           transform: isCurrentHovered
                             ? "scale(1.25)"
                             : "scale(1)",
-                          transition:
-                            "transform 0.15s ease-in-out" /* Smooth hover effect transition */,
+                          transition: "transform 0.15s ease-in-out",
                         }}
                         onMouseEnter={() => setHoveredClub(club)}
                         onMouseLeave={() => setHoveredClub(null)}

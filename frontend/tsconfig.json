@@ -16,6 +16,6 @@
     "noUnusedParameters": true,
     "noFallthroughCasesInSwitch": true
   },
-  "include": ["src", "public/county_assets.ts", "public/county_pitch_assets.ts", "public/CountyColourPattern.tsx"],
+  "include": ["src", "public/CountyColourPattern.tsx"],
   "references": [{ "path": "./tsconfig.node.json" }]
 }

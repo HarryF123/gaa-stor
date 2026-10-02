@@ -1,0 +1,138 @@
+html, body, #root, .page {
+  width: 100vw;
+  height: 100vh;
+  height: 100dvh; /* Target mobile responsive viewports securely */
+  margin: 0;
+  padding: 0;
+  overflow: hidden; /* 🌟 Crucial: Kills the main browser window scrolling */
+  display: flex;
+  flex-direction: column;
+}
+
+.themeToggleBtn {
+  flex-shrink: 0;
+}
+
+/* Hide the moon icon in light mode, the sun icon in dark mode */
+:root[data-mantine-color-scheme="light"] .icon-moon {
+  display: none !important;
+}
+
+:root[data-mantine-color-scheme="dark"] .icon-sun {
+  display: none !important;
+}
+
+.layout {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+
+  height: calc(100vdh - 56px);
+  max-height: calc(100vdh - 56px);
+  gap: 20px;
+  box-sizing: border-box;
+  overflow: hidden; /* Prevents the layout from scrolling, keeping the map and side panel fixed */
+}
+
+/* Desktop split: locked side-by-side without overflowing */
+@media (min-width: 768px) {
+  .layout {
+    flex-direction: row;
+    align-items: stretch; /* Forces columns to match the locked layout height */
+    gap: 40px;
+  }
+}
+
+/* The map needs a real height, or the canvas is clipped to nothing */
+.mapCol {
+  width: 100%;
+  height: calc(100dvh - var(--app-shell-header-height, 56px));
+  min-height: 420px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+}
+
+.mapFrame {
+  position: relative; /* anchors the reset button inside the map */
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 12px;
+  overflow: hidden;
+}
+
+/* Must match the 28px icon so the Marker's bottom anchor sits on the pin tip.
+   Hover scale is handled inline in App.tsx. */
+.pitchMarkerPin {
+  width: 28px;
+  height: 28px;
+  cursor: pointer;
+  color: var(--mantine-primary-color-light);
+}
+
+.pitchMarkerIcon {
+  display: block;
+  width: 28px;
+  height: 28px;
+}
+
+/* Position is set inline (fixed, follows the mouse); this just lifts it above the map */
+.hoverTooltip {
+  z-index: 2000;
+  background: var(--mantine-primary-color-light);
+  color: var(--mantine-primary-color-light-color);
+  border: 1px solid var(--mantine-primary-color-light-hover);
+  box-shadow: var(--mantine-shadow-md);
+}
+
+/* Appears top-right once zoomed in past a county's default zoom */
+.resetViewButton {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  z-index: 10;
+  background: var(--mantine-primary-color-light);
+  color: var(--mantine-primary-color-light-color);
+  border: 1px solid var(--mantine-primary-color-light-hover);
+  border-radius: 6px;
+  padding: 6px 12px;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.resetViewButton:hover {
+  background: var(--mantine-primary-color-light-hover);
+}
+
+.status-panel {
+  position: absolute;
+  bottom: 12px;           /* Aligns with the map-gl control gaps */
+  left: 12px;
+  z-index: 10;            /* Floats above the map canvas */
+  
+  background: rgba(31, 41, 55, 0.85); /* Semitransparent dark slate gray */
+  backdrop-filter: blur(4px);         /* Sleek blur effect */
+  border: 1px solid #4b5563;          /* Subtle border matching the reset button */
+  border-radius: 6px;
+  padding: 6px 12px;
+  max-width: calc(100% - 24px);
+  pointer-events: none;               /* Allows clicking "through" the panel if needed */
+}
+
+.status-panel p {
+  margin: 0;
+  font-size: 11px;
+  color: #ffffff;
+  font-family: sans-serif;
+  white-space: nowrap;
+}
+
+.status-panel .text-highlight {
+  color: #f97316;
+  font-weight: 600;
+}

@@ -1,0 +1,166 @@
+#!/usr/bin/env node
+// ONE TIME IMPORT TO GENERATE GAA DATABASE --> backend/src/main/java/resources/db/migration
+// Generates a Flyway seed migration from the frontend's county + pitch asset files.
+//
+// Run from the repo root (no dependencies, Node 18+):
+//   node scripts/generate-seed.mjs [outputFile]
+//
+// Reads : frontend/public/county_assets.ts
+//         frontend/public/county_pitch_assets.ts
+// Writes: backend/src/main/resources/db/migration/V3__seed_reference_data.sql
+//
+// Notes
+// - The pitch file has one row per PITCH, not per club (a club with two grounds
+//   appears twice), so rows are grouped into clubs (county + name) and pitches.
+// - The "Code" field in the pitch file is the sport (Hurling/Football/Mixed),
+//   so it goes into gaa_clubs.gaa_code, NOT gaa_clubs.code.
+
+import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
+import { dirname } from "node:path";
+
+const COUNTIES_TS = "frontend/public/county_assets.ts";
+const PITCHES_TS = "frontend/public/county_pitch_assets.ts";
+const OUT =
+  process.argv[2] ??
+  "backend/src/main/resources/db/migration/V3__seed_reference_data.sql";
+
+// --- read the exported literal out of a .ts file -----------------------------
+function readLiteral(file, exportName) {
+  const src = readFileSync(file, "utf8");
+  const decl = src.indexOf(`export const ${exportName}`);
+  if (decl < 0) throw new Error(`export const ${exportName} not found in ${file}`);
+  const start = src.indexOf("= ", decl) + 2;
+  const close = src[start] === "{" ? "}" : "]";
+  const text = src.slice(start, src.lastIndexOf(close) + 1);
+  return new Function(`return (${text})`)();
+}
+
+// --- SQL helpers -------------------------------------------------------------
+const blank = (v) => v === undefined || v === null || String(v).trim() === "";
+const str = (v) => (blank(v) ? "NULL" : `'${String(v).trim().replace(/'/g, "''")}'`);
+const num = (v) => {
+  const n = Number(v);
+  if (!Number.isFinite(n)) throw new Error(`Not a number: ${v}`);
+  return String(n);
+};
+const firstNonBlank = (...vals) => vals.find((v) => !blank(v));
+
+const counties = readLiteral(COUNTIES_TS, "gaaCounties");
+const pitchRows = readLiteral(PITCHES_TS, "countyPitchAssets");
+
+// --- group pitch rows into clubs + pitches ------------------------------------
+const CODES = new Set(["HURLING", "FOOTBALL", "MIXED"]);
+const clubs = new Map(); // "county|name" -> club
+const countyMeta = new Map(); // county -> { province, country }
+
+for (const r of pitchRows) {
+  const county = r.County?.trim();
+  if (!counties[county]) {
+    throw new Error(`Pitch "${r.Club}" has unknown county "${r.County}"`);
+  }
+  if (!countyMeta.has(county)) {
+    countyMeta.set(county, { province: r.Province, country: r.Country });
+  }
+
+  const key = `${county}|${r.Club.trim().toLowerCase()}`;
+  let club = clubs.get(key);
+  if (!club) {
+    club = {
+      county,
+      name: r.Club.trim(),
+      gaaCode: null,
+      twitter: null,
+      wikipedia: null,
+      crest: null,
+      primary: null,
+      secondary: null,
+      pitches: [],
+    };
+    clubs.set(key, club);
+  }
+
+  // If a club appears on several rows, keep the first non-empty value per field
+  const code = blank(r.Code) ? null : String(r.Code).trim().toUpperCase();
+  if (code && !CODES.has(code)) console.warn(`Ignoring unknown code "${r.Code}" for ${r.Club}`);
+  club.gaaCode = firstNonBlank(club.gaaCode, CODES.has(code) ? code : null) ?? null;
+  club.twitter = firstNonBlank(club.twitter, r.Twitter) ?? null;
+  club.wikipedia = firstNonBlank(club.wikipedia, r.Wikipedia) ?? null;
+  club.crest = firstNonBlank(club.crest, r.Crest) ?? null;
+  club.primary = firstNonBlank(club.primary, r.Colours?.primary) ?? null;
+  club.secondary = firstNonBlank(club.secondary, r.Colours?.secondary) ?? null;
+
+  const lat = num(r.Latitude);
+  const lng = num(r.Longitude);
+  if (!club.pitches.some((p) => p.lat === lat && p.lng === lng)) {
+    club.pitches.push({ name: blank(r.Pitch) ? null : r.Pitch.trim(), lat, lng });
+  }
+}
+
+const clubList = [...clubs.values()];
+const pitchCount = clubList.reduce((n, c) => n + c.pitches.length, 0);
+
+// --- build SQL ---------------------------------------------------------------
+const countyValues = Object.entries(counties).map(([name, c]) => {
+  const meta = countyMeta.get(name) ?? {};
+  return (
+    `  (${str(name)}, ${str(meta.province)}, ${str(meta.country)}, ${str(c.stadium)}, ` +
+    `${str(c.primaryColor)}, ${str(c.secondaryColor)}, ${str(c.tertiaryColor)}, ` +
+    `${num(c.center[0])}, ${num(c.center[1])}, ${num(c.zoom)})`
+  );
+});
+
+const clubValues = clubList.map(
+  (c) =>
+    `  (${str(c.county)}, ${str(c.name)}, ${str(c.gaaCode)}, ${str(c.twitter)}, ` +
+    `${str(c.wikipedia)}, ${str(c.crest)}, ${str(c.primary)}, ${str(c.secondary)})`,
+);
+
+const pitchValues = clubList.flatMap((c) =>
+  c.pitches.map(
+    (p) => `  (${str(c.county)}, ${str(c.name)}, ${str(p.name)}, ${p.lat}, ${p.lng})`,
+  ),
+);
+
+const sql = `-- Generated by scripts/generate-seed.mjs - regenerate rather than editing by hand.
+-- ${pitchRows.length} pitch rows -> ${clubList.length} clubs, ${pitchCount} pitches, ${countyValues.length} counties
+
+INSERT INTO counties
+  (name, province, country, stadium, primary_colour, secondary_colour, tertiary_colour,
+   map_center_lng, map_center_lat, map_zoom)
+VALUES
+${countyValues.join(",\n")}
+ON CONFLICT (name) DO UPDATE SET
+  province = EXCLUDED.province,
+  country = EXCLUDED.country,
+  stadium = EXCLUDED.stadium,
+  primary_colour = EXCLUDED.primary_colour,
+  secondary_colour = EXCLUDED.secondary_colour,
+  tertiary_colour = EXCLUDED.tertiary_colour,
+  map_center_lng = EXCLUDED.map_center_lng,
+  map_center_lat = EXCLUDED.map_center_lat,
+  map_zoom = EXCLUDED.map_zoom;
+
+INSERT INTO gaa_clubs
+  (county_id, name, gaa_code, twitter_url, wikipedia_url, crest_url, primary_colour, secondary_colour)
+SELECT c.id, v.name, v.gaa_code, v.twitter_url, v.wikipedia_url, v.crest_url,
+       v.primary_colour, v.secondary_colour
+FROM (VALUES
+${clubValues.join(",\n")}
+) AS v(county, name, gaa_code, twitter_url, wikipedia_url, crest_url, primary_colour, secondary_colour)
+JOIN counties c ON c.name = v.county;
+
+INSERT INTO club_pitches (club_id, name, latitude, longitude)
+SELECT g.id, v.pitch, v.latitude, v.longitude
+FROM (VALUES
+${pitchValues.join(",\n")}
+) AS v(county, club, pitch, latitude, longitude)
+JOIN counties c ON c.name = v.county
+JOIN gaa_clubs g ON g.county_id = c.id AND g.name = v.club;
+`;
+
+mkdirSync(dirname(OUT), { recursive: true });
+writeFileSync(OUT, sql, "utf8");
+console.log(
+  `Wrote ${OUT}: ${countyValues.length} counties, ${clubList.length} clubs, ${pitchCount} pitches ` +
+    `(from ${pitchRows.length} rows)`,
+);

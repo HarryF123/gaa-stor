@@ -1,0 +1,11 @@
+spring:
+  datasource:
+    url: jdbc:postgresql://localhost:5432/myapp
+    username: myapp
+    password: devpassword
+  jpa:
+    hibernate:
+      ddl-auto: validate   # let Flyway own the schema
+    open-in-view: false
+  flyway:
+    enabled: true

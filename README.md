@@ -7,6 +7,6 @@ Backend is Java Persistent API. Initialized through a .mjs seed file. County and
 User Capabilities (club exec to update club info and players, trainer/ coach to view player stats (in more depth), fan/ normal user) yet to be figured out/ implemented.
 
 NOTE: 
--> Regarding Players PM tiles: figuring out correct storage for it, for now, remains local, for dev purposes.
+-> Regarding PM tiles: figuring out correct storage for it, for now, remains local, for dev purposes.
 -> Regarding generate-seed.mjs: county_assets/ county_pitch_assets remain local, removed from repo - on previous commits
 --

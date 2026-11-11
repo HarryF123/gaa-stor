@@ -1,4 +1,4 @@
-package com.example.backend.geo;
+package com.example.backend.club;
 
 import java.math.BigDecimal;
 import java.util.List;

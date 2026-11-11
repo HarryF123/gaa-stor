@@ -9,22 +9,12 @@ import {
   IconUser,
   IconUsersGroup,
 } from "@tabler/icons-react";
+import { hasClubAccess, isClubStaff } from "../../auth/Roles";
+import { useAuth } from "../../auth/auth-context";
 
-export type Page = "home" | "clubs" | "players" | "competitions" | "settings";
+export type Page = "home" | "my-club" | "clubs" | "players" | "competitions" | "settings";
 
 type NavIcon = ComponentType<{ size?: number; stroke?: number }>;
-
-const MAIN_ITEMS: {
-  page: Page;
-  label: string;
-  description?: string;
-  icon: NavIcon;
-}[] = [
-  { page: "home", label: "Home", description: "Browse Ireland", icon: IconMap2 },
-  { page: "clubs", label: "Saved Clubs", icon: IconUsersGroup },
-  { page: "players", label: "Saved Players", icon: IconUser },
-  { page: "competitions", label: "Saved Competitions", icon: IconTrophy },
-];
 
 interface AppNavbarProps {
   page: Page;
@@ -34,10 +24,24 @@ interface AppNavbarProps {
 
 /** Goes inside <AppShell.Navbar>. Main links on top, Settings / Log out pinned to the bottom. */
 export default function AppNavbar({ page, onNavigate, onLogout }: AppNavbarProps) {
+  const { user } = useAuth();
+
+  const mainItems: {
+    page: Page;
+    label: string;
+    description?: string;
+    icon: NavIcon;
+  }[] = [
+    { page: "home", label: "Home", description: "Browse Ireland", icon: IconMap2 },
+    { page: "clubs", label: "Saved Clubs", icon: IconUsersGroup },
+    { page: "players", label: "Saved Players", icon: IconUser },
+    { page: "competitions", label: "Saved Competitions", icon: IconTrophy },
+  ];
+
   return (
     <>
       <AppShell.Section grow component={ScrollArea}>
-        {MAIN_ITEMS.map(({ page: target, label, description, icon: Icon }) => (
+        {mainItems.map(({ page: target, label, description, icon: Icon }) => (
           <NavLink
             key={target}
             label={label}
@@ -50,7 +54,20 @@ export default function AppNavbar({ page, onNavigate, onLogout }: AppNavbarProps
           />
         ))}
       </AppShell.Section>
-
+      <AppShell.Section>
+        <Divider my="sm" />
+        {isClubStaff(user?.role) && user?.clubId && (
+          <NavLink
+            label="My Club"
+            description="Club tools"
+            leftSection={<IconUsersGroup size={18} stroke={1.5} />}
+            active={page === "my-club"}
+            variant="light"
+            onClick={() => onNavigate("my-club")}
+            style={{ borderRadius: "var(--mantine-radius-md)" }}
+          />
+        )}
+      </AppShell.Section>
       <AppShell.Section>
         <Divider my="sm" />
         <NavLink
@@ -74,6 +91,7 @@ export default function AppNavbar({ page, onNavigate, onLogout }: AppNavbarProps
 }
 
 const TITLES: Record<Exclude<Page, "home">, string> = {
+  "my-club": "My Club",
   clubs: "Saved Clubs",
   players: "Saved Players",
   competitions: "Saved Competitions",

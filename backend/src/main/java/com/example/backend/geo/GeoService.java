@@ -1,7 +1,11 @@
 package com.example.backend.geo;
 
+import com.example.backend.club.ClubPitchRow;
+import com.example.backend.club.ClubRow;
+import com.example.backend.club.ClubSearchDto;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.stream.Collectors;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Service;
@@ -52,5 +56,15 @@ public class GeoService {
                 .map(c -> new ClubSearchDto(c.id(), c.name(), c.county(),
                         pitchesByClub.getOrDefault(c.id(), List.of())))
                 .toList();
+    }
+
+    public Optional<ClubSearchDto> clubById(Long clubId) {
+        return repo.findClubById(clubId).map(club -> {
+            List<ClubSearchDto.PitchDto> pitches = repo.findPitchesForClubs(List.of(club.id()))
+                    .stream()
+                    .map(p -> new ClubSearchDto.PitchDto(p.id(), p.name(), p.latitude(), p.longitude()))
+                    .toList();
+            return new ClubSearchDto(club.id(), club.name(), club.county(), pitches);
+        });
     }
 }

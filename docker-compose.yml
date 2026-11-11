@@ -23,6 +23,7 @@ services:
       SPRING_DATASOURCE_URL: jdbc:postgresql://db:5432/myapp
       SPRING_DATASOURCE_USERNAME: myapp
       SPRING_DATASOURCE_PASSWORD: devpassword
+      LOGGING_LEVEL_ORG_SPRINGFRAMEWORK_SECURITY: DEBUG
     depends_on:
       db:
         condition: service_healthy

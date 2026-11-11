@@ -1,7 +1,10 @@
 package com.example.backend.geo;
 
+import com.example.backend.club.ClubPitchRow;
+import com.example.backend.club.ClubRow;
 import java.util.Collection;
 import java.util.List;
+import java.util.Optional;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.Repository;
@@ -9,7 +12,8 @@ import org.springframework.data.repository.query.Param;
 
 /**
  * Read-only queries for the map and search box. The class names inside
- * "select new" must match your package - keep them in sync if you move these files.
+ * "select new" must match your package - keep them in sync if you move these
+ * files.
  */
 public interface GeoRepository extends Repository<County, Long> {
 
@@ -25,7 +29,14 @@ public interface GeoRepository extends Repository<County, Long> {
 
     @Query("""
             select new com.example.backend.geo.PitchMarkerDto(
-                p.id, g.id, g.name, c.name, p.name, p.latitude, p.longitude)
+                g.id,
+                p.id,
+                g.name,
+                c.name,
+                p.name,
+                p.latitude,
+                p.longitude
+            )
             from Pitch p
             join p.club g
             join g.county c
@@ -35,7 +46,7 @@ public interface GeoRepository extends Repository<County, Long> {
     List<PitchMarkerDto> findPitchMarkers(@Param("county") String county);
 
     @Query("""
-            select new com.example.backend.geo.ClubRow(g.id, g.name, c.name)
+            select new com.example.backend.club.ClubRow(g.id, g.name, c.name)
             from Club g
             join g.county c
             where lower(g.name) like lower(concat('%', :term, '%'))
@@ -43,8 +54,16 @@ public interface GeoRepository extends Repository<County, Long> {
             """)
     List<ClubRow> searchClubs(@Param("term") String term, Pageable pageable);
 
+        @Query("""
+            select new com.example.backend.club.ClubRow(g.id, g.name, c.name)
+            from Club g
+            join g.county c
+            where g.id = :clubId
+            """)
+        Optional<ClubRow> findClubById(@Param("clubId") Long clubId);
+
     @Query("""
-            select new com.example.backend.geo.ClubPitchRow(
+            select new com.example.backend.club.ClubPitchRow(
                 p.club.id, p.id, p.name, p.latitude, p.longitude)
             from Pitch p
             where p.club.id in :clubIds

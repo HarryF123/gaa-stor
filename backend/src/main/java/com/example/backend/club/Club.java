@@ -1,5 +1,6 @@
-package com.example.backend.geo;
+package com.example.backend.club;
 
+import com.example.backend.geo.County;
 import jakarta.persistence.Entity;
 import jakarta.persistence.FetchType;
 import jakarta.persistence.GeneratedValue;
@@ -22,4 +23,21 @@ public class Club {
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "county_id")
     private County county;
+
+    // Getters and Setters
+    public Long getId() {
+        return id;
+    }
+
+    public void setId(Long id) {
+        this.id = id;
+    }   
+
+    public String getName() {
+        return name;
+    }
+
+    public void setName(String name) {
+        this.name = name;
+    }
 }

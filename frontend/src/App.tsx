@@ -39,12 +39,26 @@ import {
   Burger,
   ActionIcon,
   Autocomplete,
+  Modal,
   useMantineColorScheme,
   useMantineTheme,
+  Text,
 } from "@mantine/core";
-import AppNavbar, { PagePlaceholder, type Page } from "./AppNavbar";
+import AppNavbar, {
+  PagePlaceholder,
+  type Page,
+} from "./components/navigation/AppNavbar";
+import ClubPage, { type SelectedClub } from "./components/club/ClubPage";
+import ClubCard from "./components/club/ClubCard";
 import { useDisclosure } from "@mantine/hooks";
 import { SunIcon, MoonIcon, MapPinIcon } from "@phosphor-icons/react";
+import { useAuth } from "./auth/auth-context";
+import { Drawer, Button } from "@mantine/core";
+import { IconPlus } from "@tabler/icons-react";
+import AddGameForm from "./club_data/AddGameForm"; // Adjust relative path as needed
+import { request, useCompetitionsLookup } from "./auth/auth";
+import { LogoutSettingsCard } from "./components/logout/LogoutSettingsCard";
+import { isClubStaff } from "./auth/Roles";
 
 const geoUrl = "/ireland-counties.json";
 const pmtilesprotocol = new pmtiles.Protocol();
@@ -155,9 +169,10 @@ function getColorLuminance(color: string): number | null {
   const match = color.match(/^#([\da-f]{3}|[\da-f]{6})$/i);
   if (!match) return null;
 
-  const hex = match[1].length === 3
-    ? [...match[1]].map((channel) => channel + channel).join("")
-    : match[1];
+  const hex =
+    match[1].length === 3
+      ? [...match[1]].map((channel) => channel + channel).join("")
+      : match[1];
   const channels = [0, 2, 4].map((index) => {
     const value = parseInt(hex.slice(index, index + 2), 16) / 255;
     return value <= 0.04045 ? value / 12.92 : ((value + 0.055) / 1.055) ** 2.4;
@@ -183,7 +198,9 @@ function getContrastingColor(
   return contrastRatio(navy) >= contrastRatio(lightBlue) ? navy : lightBlue;
 }
 
-function getCoordinateBounds(coordinates: unknown): maplibregl.LngLatBounds | null {
+function getCoordinateBounds(
+  coordinates: unknown,
+): maplibregl.LngLatBounds | null {
   const bounds = new maplibregl.LngLatBounds();
   let hasCoordinates = false;
 
@@ -212,12 +229,14 @@ export default function App() {
   const mapRef = useRef<MapRef | null>(null);
 
   const { colorScheme, toggleColorScheme } = useMantineColorScheme();
+  const { logout, user } = useAuth();
   const theme = useMantineTheme();
   const isDarkMode = colorScheme === "dark";
-  const [clusterColor, setClusterColor] = useState(() =>
-    getComputedStyle(document.documentElement)
-      .getPropertyValue("--mantine-primary-color-light")
-      .trim() || theme.colors[theme.primaryColor][1],
+  const [clusterColor, setClusterColor] = useState(
+    () =>
+      getComputedStyle(document.documentElement)
+        .getPropertyValue("--mantine-primary-color-light")
+        .trim() || theme.colors[theme.primaryColor][1],
   );
 
   useEffect(() => {
@@ -272,6 +291,8 @@ export default function App() {
 
   const [mobileOpened, { toggle: toggleMobile, close: closeMobile }] =
     useDisclosure(false);
+  const [logoutOpened, { open: openLogout, close: closeLogout }] =
+    useDisclosure(false);
   const [page, setPage] = useState<Page>("home");
 
   useEffect(() => {
@@ -284,7 +305,17 @@ export default function App() {
 
   const [mapViewport, setMapViewState] =
     useState<MapViewState>(defaultMapState);
+  const [selectedClub, setSelectedClub] = useState<SelectedClub | null>(null);
+  const [clubPageOpen, setClubPageOpen] = useState(false);
+
+  const isClubStaff =
+    user?.role === "CLUB_ADMIN" || user?.role === "COACH_MANAGER_PLAYER";
+  const canPostData =
+    !!selectedClub &&
+    (user?.role === "DEV_ADMIN" ||
+      (isClubStaff && user?.club?.id === selectedClub.id));
   const [hoveredClub, setHoveredClub] = useState<string | null>(null);
+
   type PitchMarker = { id: number; club: string; lng: number; lat: number };
   const [unclusteredPitches, setUnclusteredPitches] = useState<PitchMarker[]>(
     [],
@@ -554,6 +585,13 @@ export default function App() {
       const countyName = props?.NAME_1 ?? props?.name ?? props?.COUNTY;
       if (!countyName) return;
 
+      if (
+        !countyFeature ||
+        clickedCounty === countyFeature.properties?.NAME_1
+      ) {
+        setSelectedClub(null);
+      }
+
       if (clickedFeatureIdRef.current !== null) {
         map.setFeatureState(
           { source: "counties", id: clickedFeatureIdRef.current },
@@ -620,6 +658,19 @@ export default function App() {
     [clubResults],
   );
 
+  // Inside App() component declaration block:
+  const [formOpened, { open: openForm, close: closeForm }] =
+    useDisclosure(false);
+  const { data: rawCompetitions = [] } = useCompetitionsLookup();
+
+  // Format the database records cleanly into the label/value shape Mantine's <Select> expects
+  const competitionsDropdownData = useMemo(() => {
+    return rawCompetitions.map((c) => ({
+      value: String(c.id),
+      label: `${c.name} (${c.season})`,
+    }));
+  }, [rawCompetitions]);
+
   return (
     <AppShell
       header={{ height: 56 }}
@@ -628,7 +679,7 @@ export default function App() {
         breakpoint: "sm",
         collapsed: { mobile: !mobileOpened },
       }}
-      padding="md"
+      padding={0}
     >
       <AppShell.Header>
         <Group h="100%" px="md" justify="space-between" wrap="nowrap">
@@ -654,10 +705,19 @@ export default function App() {
                 if (!club) return;
                 setQuery(club.name);
                 setClickedCounty(club.county);
-                const first = club.pitches[0];
-                if (first) {
+
+                const firstPitch = club.pitches?.[0] ?? null;
+
+                // setSelectedClub({
+                //   id: club.id,
+                //   name: club.name,
+                //   county: club.county,
+                //   pitch: firstPitch?.name ?? null,
+                // });
+
+                if (firstPitch) {
                   mapRef.current?.getMap()?.flyTo({
-                    center: [first.lng, first.lat],
+                    center: [firstPitch.lng, firstPitch.lat],
                     zoom: CLUSTER_MAX_VISIBLE_ZOOM + 1,
                     duration: 1200,
                   });
@@ -683,12 +743,39 @@ export default function App() {
         <AppNavbar
           page={page}
           onNavigate={(p) => {
-            setPage(p);
+            // If the user clicks "My Club"
+            if (p === "my-club" && user?.club) {
+              setSelectedClub({
+                id: user.club.id,
+                name: user.club.name,
+                county: user.club.county,
+                pitch: user.club.pitch ?? null,
+              });
+              setClubPageOpen(true);
+              // Optionally switch back to the home map view if they were elsewhere
+              setPage("home");
+            } else {
+              setPage(p);
+            }
             closeMobile();
           }}
-          onLogout={() => console.log("log out")}
+          onLogout={openLogout}
         />
       </AppShell.Navbar>
+
+      <Modal
+        opened={logoutOpened}
+        onClose={closeLogout}
+        title="Sign out"
+        centered
+      >
+        <LogoutSettingsCard
+          onLogout={async () => {
+            await logout();
+            closeLogout();
+          }}
+        />
+      </Modal>
       <AppShell.Main>
         <div hidden={page !== "home"}>
           <div className={classes.layout}>
@@ -703,6 +790,21 @@ export default function App() {
                     Reset County View
                   </button>
                 )}
+
+                <ClubCard
+                  club={clubPageOpen ? null : selectedClub}
+                  onClose={() => setSelectedClub(null)}
+                  onExpand={() => setClubPageOpen(true)}
+                  onRecordMatch={canPostData ? openForm : undefined}
+                />
+                <ClubPage
+                  club={clubPageOpen ? selectedClub : null}
+                  onClose={() => {
+                    setClubPageOpen(false);
+                    setSelectedClub(null);
+                  }}
+                  onRecordMatch={canPostData ? openForm : undefined}
+                />
 
                 <Map
                   ref={mapRef}
@@ -870,7 +972,17 @@ export default function App() {
                         anchor="bottom"
                         onClick={(e) => {
                           e.originalEvent.stopPropagation();
-                          console.log("Clicked pitch:", club);
+                          // Pull pitch information from your useMemoized pitch map utility
+                          const fullPitchData = pitchById.get(id);
+                          if (!fullPitchData) return;
+                          setSelectedClub({
+                            id: fullPitchData.clubId,
+                            name: club,
+                            county:
+                              clickedCounty || fullPitchData?.county || "",
+                            pitch: fullPitchData?.pitch ?? null,
+                          });
+                          setClubPageOpen(false);
                         }}
                       >
                         <div
@@ -933,6 +1045,26 @@ export default function App() {
           </div>
         </div>
       </AppShell.Main>
+      <Drawer
+        opened={formOpened}
+        onClose={closeForm}
+        title={`Record New Match Statistics Workspace`}
+        position="right"
+        size="xl"
+      >
+        {selectedClub ? (
+          <AddGameForm
+            clubId={selectedClub.id}
+            clubName={selectedClub.name}
+            competitionsList={competitionsDropdownData}
+            onSuccess={closeForm}
+          />
+        ) : (
+          <Text c="dimmed" ta="center" mt="xl">
+            Please select a club marker pin on the map to begin mapping stats.
+          </Text>
+        )}
+      </Drawer>
     </AppShell>
   );
 }
